@@ -21,7 +21,7 @@ export const registerUser = async (req, res) => {
     await user.save();
 
     const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, {
-      expiresIn: "1h",
+      expiresIn: process.env.JWT_EXPIRE,
     });
 
     res.status(201).json({
