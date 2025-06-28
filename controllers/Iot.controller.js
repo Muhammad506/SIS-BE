@@ -10,6 +10,7 @@ const ALL_DATA_URL = process.env.ALL_DATA_URL.replace(
 );
 const WRITE_API_KEY = process.env.THINGSPEAK_WRITE_API_KEY;
 const CHANNEL_ID = 2947009; // Hardcoded from Arduino code for consistency
+const RELAY_UPDATE_DELAY = 17000; // 17 seconds delay for relay updates
 
 // Helper function to sanitize feed data
 const sanitizeFeed = (feed) => ({
@@ -68,6 +69,9 @@ export const fetchAndStoreSeedData = async (req, res) => {
     if (error.code === "ECONNABORTED") {
       return res.status(504).json({ error: "Request to ThingSpeak timed out" });
     }
+    if (error.response?.status === 404) {
+      return res.status(404).json({ error: "ThingSpeak API route not found" });
+    }
     res.status(500).json({ error: "Failed to fetch or save data" });
   }
 };
@@ -91,7 +95,7 @@ export const updateRelayFlag = async (req, res) => {
 
     // Fetch latest data from ThingSpeak to preserve sensor values
     let latestFeed = {};
-    let retries = 3;
+    let retries = 5; // Increased retries for reliability
     while (retries > 0) {
       try {
         const response = await axios.get(ALL_DATA_URL, { timeout: 15000 });
@@ -122,16 +126,16 @@ export const updateRelayFlag = async (req, res) => {
     // Update the specified relay field
     fieldValues[`field${field}`] = value.toString();
 
-    // Write all fields to ThingSpeak
+    // Write all fields to ThingSpeak with delay
     const writeUrl = `https://api.thingspeak.com/update?api_key=${WRITE_API_KEY}&field1=${fieldValues.field1}&field2=${fieldValues.field2}&field3=${fieldValues.field3}&field4=${fieldValues.field4}&field5=${fieldValues.field5}&field6=${fieldValues.field6}&field7=${fieldValues.field7}&field8=${fieldValues.field8}`;
 
-    retries = 3;
+    retries = 5; // Increased retries for reliability
     let writeResponse;
     while (retries > 0) {
       try {
         writeResponse = await axios.get(writeUrl, { timeout: 15000 });
         if (writeResponse.data === 0) {
-          throw new Error("ThingSpeak update failed");
+          throw new Error("ThingSpeak update failed: Zero entry ID returned");
         }
         break;
       } catch (error) {
@@ -146,6 +150,9 @@ export const updateRelayFlag = async (req, res) => {
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     }
+
+    // Enforce 17-second delay before allowing another update
+    await new Promise((resolve) => setTimeout(resolve, RELAY_UPDATE_DELAY));
 
     // Update MongoDB with new feed
     const newFeed = {
@@ -177,6 +184,9 @@ export const updateRelayFlag = async (req, res) => {
     console.error("Error updating relay flag:", error.message);
     if (error.code === "ECONNABORTED") {
       return res.status(504).json({ error: "Request to ThingSpeak timed out" });
+    }
+    if (error.response?.status === 404) {
+      return res.status(404).json({ error: "ThingSpeak API route not found" });
     }
     res.status(500).json({ error: "Internal server error" });
   }
